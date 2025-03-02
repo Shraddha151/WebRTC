@@ -64,7 +64,7 @@ router.post("/login", async (req, res) => {
     }
 
     // Generate JWT
-    const token = jwt.sign({ id: user._id, username: user.username, email: user.email, city: user.city }, "mongodb://127.0.0.1/local", { expiresIn: "1h" });
+    const token = jwt.sign({ id: user._id, username: user.username, email: user.email, city: user.city }, "mongodb+srv://shraddhabhat151@gmail.com:<Spbhat151@>@cluster0.3erwj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", { expiresIn: "1h" });
 
     res.status(200).json({ message: "Login successful", ticket: token });
   } catch (error) {
