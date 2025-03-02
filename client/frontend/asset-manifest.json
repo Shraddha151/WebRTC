@@ -1,0 +1,27 @@
+{
+  "files": {
+    "main.css": "/static/css/main.8c64ccdb.chunk.css",
+    "main.js": "/static/js/main.eed8ea96.chunk.js",
+    "main.js.map": "/static/js/main.eed8ea96.chunk.js.map",
+    "runtime-main.js": "/static/js/runtime-main.81534a39.js",
+    "runtime-main.js.map": "/static/js/runtime-main.81534a39.js.map",
+    "static/js/2.d8b587a5.chunk.js": "/static/js/2.d8b587a5.chunk.js",
+    "static/js/2.d8b587a5.chunk.js.map": "/static/js/2.d8b587a5.chunk.js.map",
+    "index.html": "/index.html",
+    "precache-manifest.3384f80901fd5f5f56f9c8227cbfe2e9.js": "/precache-manifest.3384f80901fd5f5f56f9c8227cbfe2e9.js",
+    "service-worker.js": "/service-worker.js",
+    "static/css/main.8c64ccdb.chunk.css.map": "/static/css/main.8c64ccdb.chunk.css.map",
+    "static/js/2.d8b587a5.chunk.js.LICENSE.txt": "/static/js/2.d8b587a5.chunk.js.LICENSE.txt",
+    "static/media/end-call-icon.svg": "/static/media/end-call-icon.bb70e485.svg",
+    "static/media/micmute.svg": "/static/media/micmute.22ed48be.svg",
+    "static/media/micunmute.svg": "/static/media/micunmute.aff35866.svg",
+    "static/media/webcam.svg": "/static/media/webcam.9f0afb70.svg",
+    "static/media/webcamoff.svg": "/static/media/webcamoff.fe3df939.svg"
+  },
+  "entrypoints": [
+    "static/js/runtime-main.81534a39.js",
+    "static/js/2.d8b587a5.chunk.js",
+    "static/css/main.8c64ccdb.chunk.css",
+    "static/js/main.eed8ea96.chunk.js"
+  ]
+}
