@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+/*import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 import Peer from "simple-peer";
 import styled from "styled-components";
@@ -344,6 +344,214 @@ const Room = (props) => {
             </div>
           );
         })}
+      </Container>
+      <Footer />
+    </MainContainer>
+  );
+};
+
+export default Room;
+*/
+
+import React, { useEffect, useRef, useState } from "react";
+import io from "socket.io-client";
+import Peer from "simple-peer";
+import styled from "styled-components";
+import { jwtDecode } from "jwt-decode";
+import micmute from "../assets/micmute.svg";
+import micunmute from "../assets/micunmute.svg";
+import webcam from "../assets/webcam.svg";
+import webcamoff from "../assets/webcamoff.svg";
+import Header from "../components/Header";
+import Footer from "../components/Footer";
+import { fetchUsers } from "../apis/authApis";
+
+const Container = styled.div`
+  height: 100vh;
+  width: 20%;
+`;
+
+const MainContainer = styled.div`
+  height: 100vh;
+  width: 100%;
+`;
+
+const Controls = styled.div`
+  margin: 3px;
+  padding: 5px;
+  height: 27px;
+  width: 98%;
+  background-color: rgba(255, 226, 104, 0.1);
+  margin-top: -8.5vh;
+  filter: brightness(1);
+  z-index: 1;
+  border-radius: 6px;
+`;
+
+const StyledVideo = styled.video`
+  width: 100%;
+  position: static;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 1px;
+  border: 5px solid gray;
+`;
+
+const Video = (props) => {
+  const ref = useRef();
+
+  useEffect(() => {
+    props.peer.on("stream", (stream) => {
+      ref.current.srcObject = stream;
+    });
+  }, []);
+
+  return <StyledVideo playsInline autoPlay ref={ref} />;
+};
+
+const Room = (props) => {
+  const [user, setUser] = useState(null);
+  const [peers, setPeers] = useState([]);
+  const socketRef = useRef();
+  const userVideo = useRef();
+  const streamRef = useRef();
+  const peersRef = useRef([]);
+  const roomID = props.match.params.roomID;
+  const videoConstraints = {
+    minAspectRatio: 1.333,
+    minFrameRate: 60,
+    height: window.innerHeight / 1.8,
+    width: window.innerWidth / 2,
+  };
+
+  useEffect(() => {
+    socketRef.current = io.connect("/");
+    const token = localStorage.getItem("authTicket");
+
+    if (token) {
+      try {
+        const decodedUser = jwtDecode(token);
+        setUser(decodedUser);
+        createStream(decodedUser);
+      } catch (error) {
+        console.error("Invalid token:", error);
+        setUser(null);
+      }
+    }
+
+    return () => {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      socketRef.current.disconnect();
+    };
+  }, []);
+
+  async function createStream(dUser) {
+    navigator.mediaDevices
+      .getUserMedia({ video: videoConstraints, audio: true })
+      .then((stream) => {
+        streamRef.current = stream;
+        userVideo.current.srcObject = stream;
+        socketRef.current.emit("join room", { roomID, username: dUser.username });
+
+        socketRef.current.on("all users", (users) => {
+          const peers = [];
+          users.forEach((socketUser) => {
+            let userID = socketUser.socketId;
+            const peer = createPeer(userID, socketRef.current.id, stream);
+            peersRef.current.push({ peerID: userID, peer });
+            peers.push({ peerID: userID, peer });
+          });
+          setPeers(peers);
+        });
+
+        socketRef.current.on("user joined", (payload) => {
+          const peer = addPeer(payload.signal, payload.callerID, stream);
+          peersRef.current.push({ peerID: payload.callerID, peer });
+          setPeers((users) => [...users, { peer, peerID: payload.callerID }]);
+        });
+
+        socketRef.current.on("user left", (id) => {
+          const peerObj = peersRef.current.find((p) => p.peerID === id);
+          if (peerObj) peerObj.peer.destroy();
+          peersRef.current = peersRef.current.filter((p) => p.peerID !== id);
+          setPeers(peersRef.current);
+        });
+
+        socketRef.current.on("receiving returned signal", (payload) => {
+          const item = peersRef.current.find((p) => p.peerID === payload.id);
+          if (item) item.peer.signal(payload.signal);
+        });
+      });
+  }
+
+  function createPeer(userToSignal, callerID, stream) {
+    const peer = new Peer({ initiator: true, trickle: false, stream });
+
+    peer.on("signal", (signal) => {
+      socketRef.current.emit("sending signal", { userToSignal, callerID, signal });
+    });
+
+    return peer;
+  }
+
+  function addPeer(incomingSignal, callerID, stream) {
+    const peer = new Peer({ initiator: false, trickle: false, stream });
+
+    peer.on("signal", (signal) => {
+      socketRef.current.emit("returning signal", { signal, callerID });
+    });
+
+    peer.signal(incomingSignal);
+
+    return peer;
+  }
+
+  /** ✅ Periodic WebRTC Stats Collection **/
+  useEffect(() => {
+    const statsInterval = setInterval(() => {
+      peersRef.current.forEach((peerObj) => {
+        if (peerObj.peer && peerObj.peer._pc) {
+          peerObj.peer._pc.getStats(null).then((statsReport) => {
+            let latency = 0;
+            let packetLoss = 0;
+            let jitter = 0;
+            let bandwidth = 0;
+
+            statsReport.forEach((report) => {
+              if (report.type === "candidate-pair" && report.state === "succeeded") {
+                latency = report.currentRoundTripTime || 0;
+              }
+              if (report.type === "inbound-rtp" && !report.isRemote) {
+                const lost = report.packetsLost || 0;
+                const received = report.packetsReceived || 1; // avoid division by zero
+                packetLoss = (lost / (lost + received)) * 100;
+                jitter = report.jitter || 0;
+              }
+            });
+
+            if (socketRef.current) {
+              socketRef.current.emit("webrtc_stats", { latency, packetLoss, jitter, bandwidth });
+              console.log("Emitting WebRTC Stats:", { latency, packetLoss, jitter, bandwidth });
+            }
+          }).catch((error) => console.error("Error collecting WebRTC stats:", error));
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(statsInterval);
+  }, []);
+
+  return (
+    <MainContainer>
+      <Header {...props} />
+      <Container>
+        <StyledVideo muted ref={userVideo} autoPlay playsInline />
+        {peers.map((peer) => (
+          <Video key={peer.peerID} peer={peer.peer} />
+        ))}
+        <Controls>
+          <span>{user?.username}</span>
+        </Controls>
       </Container>
       <Footer />
     </MainContainer>
