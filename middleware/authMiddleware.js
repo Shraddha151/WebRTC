@@ -10,7 +10,7 @@ const authMiddleware = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, "mongodb+srv://shraddhabhat151@gmail.com:<Spbhat151@>@cluster0.3erwj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0");
+    const decoded = jwt.verify(token, "mongodb+srv://shraddhabhab955@gmail.com:<Spbhat151@>@cluster0.3erwj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0");
     req.user = await User.findById(decoded.id).select("-password"); // Attach user info to the request
     next();
   } catch (error) {
