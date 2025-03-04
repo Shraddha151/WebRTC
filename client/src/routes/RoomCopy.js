@@ -1637,7 +1637,9 @@ const RoomCopy = (props) => {
               let latency = 0;
               let packetLoss = 0;
               let jitter = 0;
-              let bandwidth = 0; // Placeholder for bandwidth computation
+              let bandwidth = 0;
+              let previousBytesReceived = 0;
+              let previousTimestamp = 0;
 
               statsReport.forEach((report) => {
                 if (report.type === "candidate-pair" && report.state === "succeeded") {
@@ -1648,12 +1650,28 @@ const RoomCopy = (props) => {
                   const received = report.packetsReceived || 1; // Avoid division by zero
                   packetLoss = (lost / (lost + received)) * 100;
                   jitter = report.jitter || 0;
+
+                  const bytesReceived = report.bytesReceived || 0;
+                  const timestamp = report.timestamp || 0;
+
+                  if (previousBytesReceived > 0 && previousTimestamp > 0) {
+                    const bytesDiff = bytesReceived - previousBytesReceived;
+                    const timeDiff = timestamp - previousTimestamp;
+                    bandwidth = (bytesDiff * 8) / (timeDiff / 1000); // Convert to kbps
+                  }
+
+                  previousBytesReceived = bytesReceived;
+                  previousTimestamp = timestamp;
                 }
               });
 
               if (socketRef.current) {
-                socketRef.current.emit("webrtc_stats", { latency, packetLoss, jitter, bandwidth });
-                console.log("Emitting WebRTC Stats:", { latency, packetLoss, jitter, bandwidth });
+                try {
+                  socketRef.current.emit("webrtc_stats", { latency, packetLoss, jitter, bandwidth });
+                  console.log("Emitting WebRTC Stats:", { latency, packetLoss, jitter, bandwidth });
+                } catch (error) {
+                  console.error("Error emitting WebRTC stats:", error);
+                }
               }
             })
             .catch((error) => console.error("Error collecting WebRTC stats:", error));
