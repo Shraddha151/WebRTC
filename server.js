@@ -292,7 +292,7 @@ app.use(express.json());
 
 // Socket.IO Events
 io.on("connection", (socket) => {
-  console.log("🔗 New WebRTC connection:", socket.id);
+  console.log("New WebRTC connection:", socket.id);
 
   socket.on("join room", ({ roomID, username, isVideo }) => {
     if (users[roomID]) {
@@ -332,7 +332,7 @@ io.on("connection", (socket) => {
 
   // Handle WebRTC network stats
   socket.on("webrtc_stats", ({ latency, packetLoss, jitter, bandwidth }) => {
-    console.log("Received WebRTC Stats:", { latency, packetLoss, jitter, bandwidth }); // Debugging
+    console.log("Received WebRTC Stats:", { latency, packetLoss, jitter, bandwidth }); 
 
     // Update Prometheus metrics
     webrtcNetworkLatency.observe(latency); // Latency in seconds
