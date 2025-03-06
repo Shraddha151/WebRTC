@@ -1493,7 +1493,7 @@ const RoomCopy = (props) => {
   const fetchWeather = async (user) => {
     try {
       const response = await axios.get(
-        `https://api.openweathermap.org/data/2.5/weather?q=${user?.city || "Islamabad"}&units=metric&appid=37e78c3096e576c4b3758d158358e03b`
+        `https://api.openweathermap.org/data/2.5/weather?q=${user?.city || "Bengaluru"}&units=metric&appid=37e78c3096e576c4b3758d158358e03b`
       );
       if (response?.data?.main) {
         return { temp: response.data.main.temp, humidity: response.data.main.humidity };
