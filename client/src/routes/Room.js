@@ -421,34 +421,55 @@ const StyledVideo = styled.video`
   border: 5px solid gray;
 `;
 
-const Video = (props) => {
+/**
+ * Video Component
+ * ---------------
+ * Renders a video element for a given peer's stream.
+ * Polls the underlying RTCPeerConnection every 5s via getStats()
+ * and emits webrtc_stats to the server if a socket is provided.
+ */
+const Video = ({ peer, socket }) => {
   const ref = useRef();
 
   useEffect(() => {
-    // Set the video element's srcObject when the stream is received
-    props.peer.on("stream", (stream) => {
+    // Attach remote stream to the <video> element.
+    peer.on("stream", (stream) => {
       ref.current.srcObject = stream;
     });
 
     // Poll for network metrics every 5 seconds using getStats()
     const interval = setInterval(() => {
-      if (props.peer && props.peer._pc) {
-        props.peer._pc.getStats(null).then((stats) => {
-          stats.forEach((report) => {
-            // Example: Log round-trip time from candidate-pair reports if available
-            if (report.type === "candidate-pair" && report.currentRoundTripTime) {
-              console.log(`Peer RTT: ${report.currentRoundTripTime} seconds`);
+      if (peer && peer._pc) {
+        peer._pc
+          .getStats(null)
+          .then((stats) => {
+            let rtt = 0; // default to 0 if not found
+            stats.forEach((report) => {
+              // Example: Use candidate-pair's currentRoundTripTime as "latency"
+              if (report.type === "candidate-pair" && report.currentRoundTripTime) {
+                rtt = report.currentRoundTripTime; // in seconds
+              }
+              // You can parse other metrics like packet loss, jitter, or bandwidth here
+            });
+
+            // Emit the stats to the server if socket is available
+            if (socket) {
+              socket.emit("webrtc_stats", {
+                latency: rtt,          // seconds
+                packetLoss: 0,         // placeholder
+                jitter: 0,             // placeholder
+                bandwidth: 0,          // placeholder
+              });
             }
-            // Extend here to capture other metrics (jitter, packet loss, etc.)
+          })
+          .catch((error) => {
+            console.error("Error retrieving stats:", error);
           });
-        }).catch((error) => {
-          console.error("Error retrieving stats:", error);
-        });
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [props.peer]);
+  }, [peer, socket]);
 
   return <StyledVideo playsInline autoPlay ref={ref} />;
 };
@@ -461,11 +482,17 @@ const Room = (props) => {
   const [audioFlag, setAudioFlag] = useState(true);
   const [videoFlag, setVideoFlag] = useState(true);
   const [userUpdate, setUserUpdate] = useState([]);
+
+  // References
   const socketRef = useRef();
   const userVideo = useRef();
   const streamRef = useRef();
   const peersRef = useRef([]);
+
+  // Room ID from URL param
   const roomID = props.match.params.roomID;
+
+  // Video constraints
   const videoConstraints = {
     minAspectRatio: 1.333,
     minFrameRate: 60,
@@ -473,6 +500,7 @@ const Room = (props) => {
     width: window.innerWidth / 2,
   };
 
+  // Fetch all users from your API
   const fetchAllUser = async () => {
     const res = await fetchUsers();
     console.log(res);
@@ -481,6 +509,7 @@ const Room = (props) => {
     }
   };
 
+  // Initialize Socket and Media Streams
   useEffect(() => {
     socketRef.current = io.connect("/");
     const token = localStorage.getItem("authTicket");
@@ -497,50 +526,61 @@ const Room = (props) => {
       }
     }
     fetchAllUser();
+
     return () => {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
+      // Clean up: stop media tracks & disconnect socket
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
       socketRef.current.disconnect();
     };
   }, []);
 
+  // Enumerate cameras (optional)
   async function getCameras() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     return devices.filter((device) => device.kind === "videoinput");
   }
 
+  // Create local stream and handle Socket.IO events
   async function createStream(dUser) {
     const cameraList = await getCameras();
-    console.log(cameraList);
+    console.log("Available cameras:", cameraList);
+
+    // Get user media
     navigator.mediaDevices
       .getUserMedia({ video: videoConstraints, audio: true })
       .then((stream) => {
         streamRef.current = stream;
         userVideo.current.srcObject = stream;
-        socketRef.current.emit("join room", { roomID, username: dUser.username });
+
+        // Join the room
+        socketRef.current.emit("join room", {
+          roomID,
+          username: dUser.username,
+        });
+
+        // When receiving the list of existing users in the room
         socketRef.current.on("all users", (users) => {
-          console.log(users);
-          const peers = [];
+          console.log("All users in room:", users);
+          const newPeers = [];
           users.forEach((socketUser) => {
-            let userID = socketUser.socketId;
-            let username = socketUser.username;
+            const userID = socketUser.socketId;
+            const username = socketUser.username;
             const peer = createPeer(userID, socketRef.current.id, stream, username);
             peersRef.current.push({
               peerID: userID,
               peer,
               username,
             });
-            if (peers.findIndex((x) => x.peerID === userID) === -1) {
-              peers.push({
-                peerID: userID,
-                peer,
-                username,
-              });
+            if (newPeers.findIndex((x) => x.peerID === userID) === -1) {
+              newPeers.push({ peerID: userID, peer, username });
             }
           });
-          setPeers(peers);
+          setPeers(newPeers);
         });
+
+        // Another user joins the room
         socketRef.current.on("user joined", (payload) => {
           console.log("User joined:", payload);
           const peer = addPeer(payload.signal, payload.callerID, stream, payload.username);
@@ -549,12 +589,18 @@ const Room = (props) => {
             peer,
             username: payload.username,
           });
-          const peerObj = { peer, peerID: payload.callerID, username: payload.username };
+          const peerObj = {
+            peer,
+            peerID: payload.callerID,
+            username: payload.username,
+          };
+          // Avoid duplicates
           if (peers.findIndex((x) => x.peerID === payload.callerID) === -1) {
             setPeers((prevPeers) => [...prevPeers, peerObj]);
           }
         });
 
+        // User leaves
         socketRef.current.on("user left", (id) => {
           const peerObj = peersRef.current.find((p) => p.peerID === id);
           if (peerObj) {
@@ -564,17 +610,23 @@ const Room = (props) => {
           setPeers(peersRef.current);
         });
 
+        // Receiving a returned signal
         socketRef.current.on("receiving returned signal", (payload) => {
           const item = peersRef.current.find((p) => p.peerID === payload.id);
-          item.peer.signal(payload.signal);
+          if (item) {
+            item.peer.signal(payload.signal);
+          }
         });
 
+        // Handle changes in user audio/video flags
         socketRef.current.on("change", (payload) => {
           setUserUpdate(payload);
         });
-      });
+      })
+      .catch((err) => console.error("Error accessing media devices:", err));
   }
 
+  // Create a new Peer (initiator)
   function createPeer(userToSignal, callerID, stream, username) {
     const peer = new Peer({
       initiator: true,
@@ -583,12 +635,18 @@ const Room = (props) => {
     });
 
     peer.on("signal", (signal) => {
-      socketRef.current.emit("sending signal", { userToSignal, callerID, signal, username });
+      socketRef.current.emit("sending signal", {
+        userToSignal,
+        callerID,
+        signal,
+        username,
+      });
     });
 
     return peer;
   }
 
+  // Add a Peer (non-initiator)
   function addPeer(incomingSignal, callerID, stream, username) {
     const peer = new Peer({
       initiator: false,
@@ -597,7 +655,11 @@ const Room = (props) => {
     });
 
     peer.on("signal", (signal) => {
-      socketRef.current.emit("returning signal", { signal, callerID, username });
+      socketRef.current.emit("returning signal", {
+        signal,
+        callerID,
+        username,
+      });
     });
 
     peer.signal(incomingSignal);
@@ -611,6 +673,7 @@ const Room = (props) => {
         <div>
           <StyledVideo muted ref={userVideo} autoPlay playsInline />
           <Controls>
+            {/* Video Toggle */}
             <ImgComponent
               src={videoFlag ? webcam : webcamoff}
               onClick={() => {
@@ -638,6 +701,7 @@ const Room = (props) => {
               }}
             />
             &nbsp;&nbsp;&nbsp;
+            {/* Audio Toggle */}
             <ImgComponent
               src={audioFlag ? micunmute : micmute}
               onClick={() => {
@@ -667,10 +731,12 @@ const Room = (props) => {
             <span>{user?.username}</span>
           </Controls>
         </div>
+        {/* Render each remote peer's video */}
         {peers.map((peer, index) => {
           if (index === 0) {
             userVideosArray = [];
           }
+          // Track updated audio/video flags
           let audioFlagTemp = true;
           let videoFlagTemp = true;
           if (userUpdate) {
@@ -681,16 +747,19 @@ const Room = (props) => {
               }
             });
           }
+          // Avoid duplicates
           if (userVideosArray.find((x) => x === peer.peerID)) {
             return null;
           }
           userVideosArray.push(peer.peerID);
+
           return (
             <div id={peer.peerID} key={peer.peerID} style={{ position: "relative" }}>
               <div style={{ position: "absolute", top: "0", background: "rgba(0,0,0,0.6)" }}>
                 Test toolbar
               </div>
-              <Video peer={peer.peer} />
+              {/* Pass socketRef.current to the Video component so it can emit stats */}
+              <Video peer={peer.peer} socket={socketRef.current} />
               <ControlSmall></ControlSmall>
             </div>
           );
