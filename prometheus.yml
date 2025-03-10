@@ -6,4 +6,4 @@ scrape_configs:
     tls_config:
       insecure_skip_verify: true
     static_configs:
-      - targets: ['webrtcrealtimecommunication-j8sos3oa.b4a.run']
+      - targets: ['webrtcrealtimecommunication-j8sos3oa.b4a.run/8000']
