@@ -1922,8 +1922,8 @@ const VideoGrid = styled.div`
  * Video Component
  * ----------------
  * Renders a video element for a given peer's stream.
- * Logs mounting, stream events, polling for stats, and the calculated metrics.
- * Emits "webrtc_stats" to the server using the provided socket.
+ * Logs mounting, stream events, polling for stats, and calculated metrics.
+ * Emits "webrtc_stats" to the server via the provided socket.
  */
 const Video = ({ peer, socket, ...props }) => {
   const ref = useRef();
@@ -1931,7 +1931,7 @@ const Video = ({ peer, socket, ...props }) => {
   useEffect(() => {
     console.log("[Video] Mounted for peer:", peer);
 
-    // Attach remote stream to the video element.
+    // Attach the remote stream to the video element.
     peer.on("stream", (stream) => {
       console.log("[Video] Received remote stream for peer:", peer, stream);
       ref.current.srcObject = stream;
@@ -1941,27 +1941,21 @@ const Video = ({ peer, socket, ...props }) => {
     const interval = setInterval(() => {
       if (peer && peer._pc) {
         console.log("[Video] Polling stats for peer:", peer);
-        peer._pc
-          .getStats(null)
+        peer._pc.getStats(null)
           .then((stats) => {
             let rtt = 0;
             let packetLoss = 0;
             let jitter = 0;
             let bandwidth = 0;
-
+            // Iterate over all stats reports.
             stats.forEach((report) => {
               // For RTT, use the candidate-pair that is selected.
-              if (
-                report.type === "candidate-pair" &&
-                report.selected &&
-                report.currentRoundTripTime
-              ) {
+              if (report.type === "candidate-pair" && report.selected && report.currentRoundTripTime) {
                 rtt = report.currentRoundTripTime; // in seconds
                 console.log("[Video] Candidate-pair report:", report);
               }
-              // Additional parsing for packet loss, jitter, or bandwidth can be added here.
+              // If needed, add parsing for inbound/outbound-rtp for packet loss, jitter, etc.
             });
-
             console.log("[Video] Calculated RTT for peer:", peer, "RTT:", rtt);
             if (socket) {
               socket.emit("webrtc_stats", {
@@ -2010,7 +2004,6 @@ const RoomCopy = (props) => {
   const userVideo = useRef();
   const streamRef = useRef();
   const peersRef = useRef([]);
-
   const roomID = props.match.params.roomID;
   const videoConstraints = {
     minAspectRatio: 1.333,
@@ -2042,7 +2035,7 @@ const RoomCopy = (props) => {
     }
   };
 
-  // Fetch users in the room.
+  // Fetch users in the current room.
   const fetchRoomUsers = async () => {
     const res = await fetchAllUsersInRoom(roomID);
     console.log("[RoomCopy] Users in room from API:", res);
@@ -2073,6 +2066,7 @@ const RoomCopy = (props) => {
   }, [peers]);
 
   useEffect(() => {
+    console.log("[RoomCopy] Initializing socket connection...");
     socketRef.current = io.connect("/");
     const token = localStorage.getItem("authTicket");
 
@@ -2091,15 +2085,13 @@ const RoomCopy = (props) => {
 
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => {
-          track.stop();
-        });
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
       socketRef.current.disconnect();
     };
   }, []);
 
-  // Create a canvas stream (fallback).
+  // Create a fallback video stream from a canvas.
   const getCanvasStream = (dUser) => {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
@@ -2119,7 +2111,7 @@ const RoomCopy = (props) => {
     return stream;
   };
 
-  // Fallback for audio-only if video is unavailable.
+  // Fallback to audio-only if video is unavailable.
   const getAudioStream = async (dUser) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
@@ -2135,10 +2127,13 @@ const RoomCopy = (props) => {
     }
   };
 
-  // Get full media stream, fallback if needed.
+  // Attempt to get full video+audio stream; fallback if necessary.
   const getStream = async (dUser) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: true,
+      });
       return stream;
     } catch (err) {
       isVideo = false;
@@ -2147,21 +2142,17 @@ const RoomCopy = (props) => {
     }
   };
 
-  // Create local stream and set up Socket.IO events.
+  // Create local stream and set up Socket.IO event listeners.
   const createStream = async (dUser) => {
     const cameraList = await getCameras();
     console.log("[RoomCopy] Camera list:", cameraList);
-
     const stream = await getStream(dUser);
     console.log("[RoomCopy] Local stream obtained:", stream);
     streamRef.current = stream;
     userVideo.current.srcObject = stream;
     setHasVideo(isVideo);
-
     console.log(`[RoomCopy] Joining room: ${roomID} as ${dUser.username}`);
     socketRef.current.emit("join room", { roomID, username: dUser.username, isVideo });
-
-    // Receive list of all users in the room.
     socketRef.current.on("all users", (users) => {
       console.log("[RoomCopy] All users in room:", users);
       const newPeers = [];
@@ -2175,8 +2166,6 @@ const RoomCopy = (props) => {
       });
       setPeers(newPeers);
     });
-
-    // Handle a new user joining.
     socketRef.current.on("user joined", (payload) => {
       console.log("[RoomCopy] User joined:", payload);
       const peer = addPeer(payload.signal, payload.callerID, stream);
@@ -2186,8 +2175,6 @@ const RoomCopy = (props) => {
         setPeers((prevPeers) => [...prevPeers, peerObj]);
       }
     });
-
-    // Handle user leaving.
     socketRef.current.on("user left", (id) => {
       console.log("[RoomCopy] User left:", id);
       const peerObj = peersRef.current.find((p) => p.peerID === id);
@@ -2198,8 +2185,6 @@ const RoomCopy = (props) => {
       peersRef.current = remainingPeers;
       setPeers(remainingPeers);
     });
-
-    // Handle receiving returned signals.
     socketRef.current.on("receiving returned signal", (payload) => {
       console.log("[RoomCopy] Receiving returned signal:", payload);
       const item = peersRef.current.find((p) => p.peerID === payload.id);
@@ -2207,8 +2192,6 @@ const RoomCopy = (props) => {
         item.peer.signal(payload.signal);
       }
     });
-
-    // Listen for changes in audio/video flags.
     socketRef.current.on("change", (payload) => {
       console.log("[RoomCopy] Received 'change' event:", payload);
       setUserUpdate(payload);
@@ -2223,12 +2206,10 @@ const RoomCopy = (props) => {
       trickle: false,
       stream,
     });
-
     peer.on("signal", (signal) => {
       console.log("[RoomCopy] Peer initiator signal:", signal);
       socketRef.current.emit("sending signal", { userToSignal, callerID, signal, roomID });
     });
-
     return peer;
   }
 
@@ -2240,17 +2221,15 @@ const RoomCopy = (props) => {
       trickle: false,
       stream,
     });
-
     peer.on("signal", (signal) => {
       console.log("[RoomCopy] Peer non-initiator signal:", signal);
       socketRef.current.emit("returning signal", { signal, callerID, roomID });
     });
-
     peer.signal(incomingSignal);
     return peer;
   }
 
-  // End the call and navigate away.
+  // End call and navigate away.
   const endCallClick = () => {
     console.log("[RoomCopy] Ending call");
     if (streamRef.current) {
@@ -2267,7 +2246,7 @@ const RoomCopy = (props) => {
   // Render the video grid.
   const getVideoGrid = (newPeers) => {
     const uniquePeers = Array.from(new Map(newPeers.map((p) => [p.peerID, p])).values());
-
+    console.log("[RoomCopy] getVideoGrid rendering with peers:", uniquePeers);
     return (
       <VideoGrid count={uniquePeers.length}>
         {uniquePeers.map((peer, index) => {
@@ -2284,19 +2263,15 @@ const RoomCopy = (props) => {
               }
             });
           }
-
           if (userVideosArray.find((x) => x === peer.peerID)) {
             return null;
           }
-
           const uIndex = usersInRoom.findIndex((x) => x.socketId === peer.peerID);
           console.log("[RoomCopy] Found user in room:", usersInRoom[uIndex]);
-
           let userDetailIndex = -1;
           if (uIndex > -1) {
             userDetailIndex = users.findIndex((x) => x.username === usersInRoom[uIndex].username);
           }
-
           userVideosArray.push(peer.peerID);
           return (
             <div
@@ -2310,13 +2285,8 @@ const RoomCopy = (props) => {
               id={peer.peerID}
               key={peer.peerID}
             >
-              <div
-                className="video-top-bar"
-                style={{ position: "absolute", top: "0", background: "rgba(255,255,255,0.6)" }}
-              >
-                <span>
-                  {userDetailIndex > -1 ? users[userDetailIndex].username : "Unknown"}
-                </span>
+              <div className="video-top-bar" style={{ position: "absolute", top: "0", background: "rgba(255,255,255,0.6)" }}>
+                <span>{userDetailIndex > -1 ? users[userDetailIndex].username : "Unknown"}</span>
                 <span>📌{userDetailIndex > -1 ? users[userDetailIndex].city : ""} </span>
                 <span> 🌡️ {userDetailIndex > -1 ? users[userDetailIndex].temp : ""}°C </span>
                 <span> 💧 {userDetailIndex > -1 ? users[userDetailIndex].humidity : ""}°C </span>
@@ -2325,8 +2295,7 @@ const RoomCopy = (props) => {
                 peer={peer.peer}
                 socket={socketRef.current}
                 style={{
-                  display:
-                    usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "block" : "none",
+                  display: usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "block" : "none",
                 }}
               />
               <div
@@ -2339,8 +2308,7 @@ const RoomCopy = (props) => {
                   color: "white",
                   fontSize: "20px",
                   fontWeight: "bold",
-                  display:
-                    usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "none" : "flex",
+                  display: usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "none" : "flex",
                 }}
               >
                 Audio Only
