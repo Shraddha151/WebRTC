@@ -1844,8 +1844,7 @@ import { fetchUsers } from "../apis/authApis";
 import { fetchAllUsersInRoom } from "../apis/roomApi";
 import axios from "axios";
 
-const Container = styled.div`
-`;
+const Container = styled.div``;
 
 const MainContainer = styled.div`
   height: 100vh;
@@ -1865,7 +1864,6 @@ const Controls = styled.div`
   height: 68px;
   align-items: center;
   justify-content: center;
-}
 `;
 
 const ControlSmall = styled.div`
@@ -1894,12 +1892,12 @@ const ImgComponentSmall = styled.img`
 `;
 
 const MyVideoContainer = styled.div`
-    z-index: 2;
-    bottom: 0;
-    height: 130px;
-    position: fixed;
-    width: 200px;
-`
+  z-index: 2;
+  bottom: 0;
+  height: 130px;
+  position: fixed;
+  width: 200px;
+`;
 
 const StyledVideo = styled.video`
   width: 100%;
@@ -1909,7 +1907,6 @@ const StyledVideo = styled.video`
   border: 3px solid gray;
   background-color: black;
 `;
-
 
 const VideoGrid = styled.div`
   display: grid;
@@ -1921,20 +1918,84 @@ const VideoGrid = styled.div`
   grid-template-rows: ${({ count }) => `repeat(${Math.ceil(count / 2)}, 1fr)`};
 `;
 
-const Video = (props) => {
+/**
+ * Video Component
+ * ----------------
+ * Renders a video element for a given peer's stream.
+ * Logs mounting, stream events, polling for stats, and the calculated metrics.
+ * Emits "webrtc_stats" to the server using the provided socket.
+ */
+const Video = ({ peer, socket, ...props }) => {
   const ref = useRef();
 
   useEffect(() => {
-    props.peer.on("stream", (stream) => {
+    console.log("[Video] Mounted for peer:", peer);
+
+    // Attach remote stream to the video element.
+    peer.on("stream", (stream) => {
+      console.log("[Video] Received remote stream for peer:", peer, stream);
       ref.current.srcObject = stream;
     });
-  }, []);
+
+    // Poll for network metrics every 5 seconds.
+    const interval = setInterval(() => {
+      if (peer && peer._pc) {
+        console.log("[Video] Polling stats for peer:", peer);
+        peer._pc
+          .getStats(null)
+          .then((stats) => {
+            let rtt = 0;
+            let packetLoss = 0;
+            let jitter = 0;
+            let bandwidth = 0;
+
+            stats.forEach((report) => {
+              // For RTT, use the candidate-pair that is selected.
+              if (
+                report.type === "candidate-pair" &&
+                report.selected &&
+                report.currentRoundTripTime
+              ) {
+                rtt = report.currentRoundTripTime; // in seconds
+                console.log("[Video] Candidate-pair report:", report);
+              }
+              // Additional parsing for packet loss, jitter, or bandwidth can be added here.
+            });
+
+            console.log("[Video] Calculated RTT for peer:", peer, "RTT:", rtt);
+            if (socket) {
+              socket.emit("webrtc_stats", {
+                latency: rtt,
+                packetLoss,
+                jitter,
+                bandwidth,
+              });
+              console.log("[Video] Emitted webrtc_stats for peer:", peer, {
+                latency: rtt,
+                packetLoss,
+                jitter,
+                bandwidth,
+              });
+            }
+          })
+          .catch((error) => {
+            console.error("[Video] Error retrieving stats for peer:", peer, error);
+          });
+      } else {
+        console.log("[Video] peer._pc not available yet for peer:", peer);
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      console.log("[Video] Unmounted for peer:", peer);
+    };
+  }, [peer, socket]);
 
   return <StyledVideo playsInline autoPlay ref={ref} {...props} />;
 };
 
 const RoomCopy = (props) => {
-  let isVideo = true;
   let userVideosArray = [];
   const [hasVideo, setHasVideo] = useState(true);
   const [user, setUser] = useState(null);
@@ -1944,10 +2005,12 @@ const RoomCopy = (props) => {
   const [audioFlag, setAudioFlag] = useState(true);
   const [videoFlag, setVideoFlag] = useState(true);
   const [userUpdate, setUserUpdate] = useState([]);
+
   const socketRef = useRef();
   const userVideo = useRef();
   const streamRef = useRef();
   const peersRef = useRef([]);
+
   const roomID = props.match.params.roomID;
   const videoConstraints = {
     minAspectRatio: 1.333,
@@ -1955,47 +2018,60 @@ const RoomCopy = (props) => {
     height: window.innerHeight / 1.8,
     width: window.innerWidth / 2,
   };
+
+  // Enumerate available cameras.
   async function getCameras() {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter(device => device.kind === "videoinput");
+    const cameraList = devices.filter((device) => device.kind === "videoinput");
+    console.log("[RoomCopy] Available cameras:", cameraList);
+    return cameraList;
   }
+
+  // Fetch weather data for a user.
   const fetchWeather = async (user) => {
     try {
       const response = await axios.get(
         `https://api.openweathermap.org/data/2.5/weather?q=${user?.city || "Islamabad"}&units=metric&appid=37e78c3096e576c4b3758d158358e03b`
       );
       if (response?.data?.main) {
-        return { temp: response.data.main.temp, humidity: response.data.main.humidity }
+        return { temp: response.data.main.temp, humidity: response.data.main.humidity };
       }
       return false;
     } catch (error) {
       return false;
     }
   };
+
+  // Fetch users in the room.
   const fetchRoomUsers = async () => {
     const res = await fetchAllUsersInRoom(roomID);
-    console.log(res)
+    console.log("[RoomCopy] Users in room from API:", res);
     if (res && res.users) {
       setUsersInRoom(res.users);
     }
-  }
+  };
+
+  // Fetch all users and attach weather data.
   const fetchAllUser = async () => {
     const res = await fetchUsers();
     if (res && res.users) {
       let resUsers = JSON.parse(JSON.stringify(res.users));
-      resUsers.forEach(async (user) => {
+      for (let user of resUsers) {
         let weather = await fetchWeather(user);
         if (weather) {
           user.temp = weather.temp;
-          user.humidity = weather.humidity
+          user.humidity = weather.humidity;
         }
-      })
+      }
+      console.log("[RoomCopy] All users with weather data:", resUsers);
       setUsers(resUsers);
     }
-  }
+  };
+
   useEffect(() => {
     fetchRoomUsers();
-  }, [peers])
+  }, [peers]);
+
   useEffect(() => {
     socketRef.current = io.connect("/");
     const token = localStorage.getItem("authTicket");
@@ -2003,144 +2079,145 @@ const RoomCopy = (props) => {
     if (token) {
       try {
         const decodedUser = jwtDecode(token);
+        console.log("[RoomCopy] Decoded user:", decodedUser);
         setUser(decodedUser);
         createStream(decodedUser);
       } catch (error) {
-        console.error("Invalid token:", error);
+        console.error("[RoomCopy] Invalid token:", error);
         setUser(null);
       }
-
     }
     fetchAllUser();
+
     return () => {
-      streamRef.current.getTracks().forEach(function (track) {
-        track.stop();
-      });
-      socketRef.current.disconnect()
-    }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
+      }
+      socketRef.current.disconnect();
+    };
   }, []);
 
+  // Create a canvas stream (fallback).
   const getCanvasStream = (dUser) => {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
     function drawText() {
-      // Clear canvas
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Set text style
       ctx.font = "40px Arial";
       ctx.fillStyle = "red";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-
-      // Draw username text
       ctx.fillText(dUser.username, canvas.width / 2, canvas.height / 2);
     }
     drawText();
     setInterval(drawText, 100);
-
-    // Create a fake video stream from the canvas
-    const stream = canvas.captureStream(30); // 30 FPS
-
+    const stream = canvas.captureStream(30);
     return stream;
-  }
+  };
+
+  // Fallback for audio-only if video is unavailable.
   const getAudioStream = async (dUser) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
       return stream;
-
     } catch (err) {
       const canvasStream = getCanvasStream(dUser);
       const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Create a new MediaStream and add video + audio tracks
       const finalStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
-        ...audioStream.getAudioTracks()
+        ...audioStream.getAudioTracks(),
       ]);
       return finalStream;
     }
-  }
+  };
+
+  // Get full media stream, fallback if needed.
   const getStream = async (dUser) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
       return stream;
-
     } catch (err) {
       isVideo = false;
-      const stream = getAudioStream(dUser);
+      const stream = await getAudioStream(dUser);
       return stream;
     }
-  }
+  };
 
+  // Create local stream and set up Socket.IO events.
   const createStream = async (dUser) => {
-    const cameraList = await getCameras()
-    console.log(cameraList);
+    const cameraList = await getCameras();
+    console.log("[RoomCopy] Camera list:", cameraList);
+
     const stream = await getStream(dUser);
-    streamRef.current = stream
+    console.log("[RoomCopy] Local stream obtained:", stream);
+    streamRef.current = stream;
     userVideo.current.srcObject = stream;
-    setHasVideo(isVideo)
+    setHasVideo(isVideo);
+
+    console.log(`[RoomCopy] Joining room: ${roomID} as ${dUser.username}`);
     socketRef.current.emit("join room", { roomID, username: dUser.username, isVideo });
+
+    // Receive list of all users in the room.
     socketRef.current.on("all users", (users) => {
-      const peers = [];
+      console.log("[RoomCopy] All users in room:", users);
+      const newPeers = [];
       users.forEach((socketUser) => {
         let userID = socketUser.socketId;
         const peer = createPeer(userID, socketRef.current.id, stream);
-        peersRef.current.push({
-          peerID: userID,
-          peer
-        });
-        let index = peers.findIndex((x) => x.peerID == userID);
-        if (index == -1) {
-          peers.push({
-            peerID: userID,
-            peer
-          });
+        peersRef.current.push({ peerID: userID, peer });
+        if (newPeers.findIndex((x) => x.peerID === userID) === -1) {
+          newPeers.push({ peerID: userID, peer });
         }
       });
-      setPeers(peers);
+      setPeers(newPeers);
     });
+
+    // Handle a new user joining.
     socketRef.current.on("user joined", (payload) => {
+      console.log("[RoomCopy] User joined:", payload);
       const peer = addPeer(payload.signal, payload.callerID, stream);
-      peersRef.current.push({
-        peerID: payload.callerID,
-        peer
-      });
-      const peerObj = {
-        peer,
-        peerID: payload.callerID
-      };
-      let index = peers.findIndex((x) => x.peerID == payload.callerID);
-      if (index == -1) {
-        setPeers((users) => [...users, peerObj]);
+      peersRef.current.push({ peerID: payload.callerID, peer });
+      const peerObj = { peer, peerID: payload.callerID };
+      if (peers.findIndex((x) => x.peerID === payload.callerID) === -1) {
+        setPeers((prevPeers) => [...prevPeers, peerObj]);
       }
     });
 
+    // Handle user leaving.
     socketRef.current.on("user left", (id) => {
-      console.log("========== user left ===========")
+      console.log("[RoomCopy] User left:", id);
       const peerObj = peersRef.current.find((p) => p.peerID === id);
       if (peerObj) {
         peerObj.peer.destroy();
       }
-      const peers = peersRef.current.filter((p) => p.peerID !== id);
-      peersRef.current = peers;
-      setPeers(peers);
+      const remainingPeers = peersRef.current.filter((p) => p.peerID !== id);
+      peersRef.current = remainingPeers;
+      setPeers(remainingPeers);
     });
 
+    // Handle receiving returned signals.
     socketRef.current.on("receiving returned signal", (payload) => {
+      console.log("[RoomCopy] Receiving returned signal:", payload);
       const item = peersRef.current.find((p) => p.peerID === payload.id);
-      item.peer.signal(payload.signal);
+      if (item) {
+        item.peer.signal(payload.signal);
+      }
     });
 
+    // Listen for changes in audio/video flags.
     socketRef.current.on("change", (payload) => {
-      console.log(payload)
+      console.log("[RoomCopy] Received 'change' event:", payload);
       setUserUpdate(payload);
     });
-  }
+  };
 
+  // Create a new Peer (initiator)
   function createPeer(userToSignal, callerID, stream) {
+    console.log(`[RoomCopy] Creating peer: callerID=${callerID}, userToSignal=${userToSignal}`);
     const peer = new Peer({
       initiator: true,
       trickle: false,
@@ -2148,18 +2225,16 @@ const RoomCopy = (props) => {
     });
 
     peer.on("signal", (signal) => {
-      socketRef.current.emit("sending signal", {
-        userToSignal,
-        callerID,
-        signal,
-        roomID
-      });
+      console.log("[RoomCopy] Peer initiator signal:", signal);
+      socketRef.current.emit("sending signal", { userToSignal, callerID, signal, roomID });
     });
 
     return peer;
   }
 
+  // Add a Peer (non-initiator)
   function addPeer(incomingSignal, callerID, stream) {
+    console.log(`[RoomCopy] Adding peer: callerID=${callerID}`);
     const peer = new Peer({
       initiator: false,
       trickle: false,
@@ -2167,38 +2242,37 @@ const RoomCopy = (props) => {
     });
 
     peer.on("signal", (signal) => {
+      console.log("[RoomCopy] Peer non-initiator signal:", signal);
       socketRef.current.emit("returning signal", { signal, callerID, roomID });
     });
 
     peer.signal(incomingSignal);
-
     return peer;
   }
 
+  // End the call and navigate away.
   const endCallClick = () => {
-    streamRef.current.getTracks().forEach(function (track) {
-      track.stop();
-    });
-    socketRef.current.disconnect();
-    const userIndex = usersInRoom.findIndex((x) => x.username == user.username);
-    if (userIndex > -1) {
-      console.log(usersInRoom[userIndex])
-      if(usersInRoom[userIndex].peer) {
-        usersInRoom[userIndex].peer.destroy()
-      }
+    console.log("[RoomCopy] Ending call");
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
     }
-    props.history.push('/rooms')
-  }
+    socketRef.current.disconnect();
+    const userIndex = usersInRoom.findIndex((x) => x.username === user.username);
+    if (userIndex > -1 && usersInRoom[userIndex].peer) {
+      usersInRoom[userIndex].peer.destroy();
+    }
+    props.history.push("/rooms");
+  };
 
+  // Render the video grid.
   const getVideoGrid = (newPeers) => {
-    const uniquePeers = Array.from(
-      new Map(newPeers.map((peer) => [peer.peerID, peer])).values()
-    );
+    const uniquePeers = Array.from(new Map(newPeers.map((p) => [p.peerID, p])).values());
+
     return (
       <VideoGrid count={uniquePeers.length}>
-        {newPeers.map((peer, index) => {
-          if (index == 0) {
-            userVideosArray = []
+        {uniquePeers.map((peer, index) => {
+          if (index === 0) {
+            userVideosArray = [];
           }
           let audioFlagTemp = true;
           let videoFlagTemp = true;
@@ -2210,75 +2284,130 @@ const RoomCopy = (props) => {
               }
             });
           }
-          let videoIndex = userVideosArray.findIndex((x) => x == peer.peerID);
-          if (videoIndex > -1) {
+
+          if (userVideosArray.find((x) => x === peer.peerID)) {
             return null;
           }
 
-          const userIndex = usersInRoom.findIndex((x) => x.socketId == peer.peerID);
-          console.log("================ user ===============")
-          console.log(usersInRoom[userIndex])
+          const uIndex = usersInRoom.findIndex((x) => x.socketId === peer.peerID);
+          console.log("[RoomCopy] Found user in room:", usersInRoom[uIndex]);
 
-          let userDetailIndex = -1
-          if (userIndex > -1) {
-            userDetailIndex = users.findIndex((x) => x.username == usersInRoom[userIndex].username)
+          let userDetailIndex = -1;
+          if (uIndex > -1) {
+            userDetailIndex = users.findIndex((x) => x.username === usersInRoom[uIndex].username);
           }
 
           userVideosArray.push(peer.peerID);
           return (
-            <div style={{
-              width: "100%",
-              height: "100%",
-              position: "relative",
-              borderRadius: "10px",
-              overflow: "hidden",
-            }} id={peer.peerID} key={peer.peerID}>
-              <div className="video-top-bar" style={{ position: "absolute", top: "0", background: "rgba(255,255,255,0.6)" }}>
-                <span>{userDetailIndex > -1 ? users[userDetailIndex].username : "Unknown"}</span>
-                <span>📌{userDetailIndex > -1 ? users[userDetailIndex].city : ''} </span>
-                <span> 🌡️ {userDetailIndex > -1 ? users[userDetailIndex].temp : ''}°C </span>
-                <span> 💧 {userDetailIndex > -1 ? users[userDetailIndex].humidity : ''}°C </span>
-                <span></span>
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                borderRadius: "10px",
+                overflow: "hidden",
+              }}
+              id={peer.peerID}
+              key={peer.peerID}
+            >
+              <div
+                className="video-top-bar"
+                style={{ position: "absolute", top: "0", background: "rgba(255,255,255,0.6)" }}
+              >
+                <span>
+                  {userDetailIndex > -1 ? users[userDetailIndex].username : "Unknown"}
+                </span>
+                <span>📌{userDetailIndex > -1 ? users[userDetailIndex].city : ""} </span>
+                <span> 🌡️ {userDetailIndex > -1 ? users[userDetailIndex].temp : ""}°C </span>
+                <span> 💧 {userDetailIndex > -1 ? users[userDetailIndex].humidity : ""}°C </span>
               </div>
-              <Video style={{ display: usersInRoom[userIndex] && usersInRoom[userIndex].isVideo ? "block" : "none" }} peer={peer.peer} />
-              <div style={{ alignItems: "center", justifyContent: "center", height: "100%", width: "100%", backgroundColor: "black", color: "white", fontSize: "20px", fontWeight: "bold", display: usersInRoom[userIndex] && usersInRoom[userIndex].isVideo ? "none" : "flex" }}>Audio Only</div>
+              <Video
+                peer={peer.peer}
+                socket={socketRef.current}
+                style={{
+                  display:
+                    usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "block" : "none",
+                }}
+              />
+              <div
+                style={{
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  width: "100%",
+                  backgroundColor: "black",
+                  color: "white",
+                  fontSize: "20px",
+                  fontWeight: "bold",
+                  display:
+                    usersInRoom[uIndex] && usersInRoom[uIndex].isVideo ? "none" : "flex",
+                }}
+              >
+                Audio Only
+              </div>
             </div>
           );
         })}
       </VideoGrid>
-    )
-  }
+    );
+  };
 
   return (
     <MainContainer>
       <Header {...props} />
       <Container>
-        <MyVideoContainer >
-          <StyledVideo style={{ display: hasVideo ? "block" : "none" }} muted ref={userVideo} autoPlay playsInline />
-          <div style={{ alignItems: "center", justifyContent: "center", height: "100%", width: "100%", backgroundColor: "black", color: "white", fontSize: "20px", fontWeight: "bold", display: hasVideo ? "none" : "flex" }}>Audio Only</div>
+        <MyVideoContainer>
+          <StyledVideo
+            style={{ display: hasVideo ? "block" : "none" }}
+            muted
+            ref={userVideo}
+            autoPlay
+            playsInline
+          />
+          <div
+            style={{
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              width: "100%",
+              backgroundColor: "black",
+              color: "white",
+              fontSize: "20px",
+              fontWeight: "bold",
+              display: hasVideo ? "none" : "flex",
+            }}
+          >
+            Audio Only
+          </div>
         </MyVideoContainer>
-        {peers.length > 0 ? getVideoGrid(peers) : <div style={{ display: 'flex', alignItems: "center", justifyContent: "center" }}><p>Waiting for participants...</p></div>}
+        {peers.length > 0 ? (
+          getVideoGrid(peers)
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <p>Waiting for participants...</p>
+          </div>
+        )}
         <Controls>
           <ImgComponent
             src={videoFlag ? webcam : webcamoff}
             onClick={() => {
               if (userVideo.current.srcObject) {
-                userVideo.current.srcObject.getTracks().forEach(function (track) {
+                userVideo.current.srcObject.getTracks().forEach((track) => {
                   if (track.kind === "video") {
                     if (track.enabled) {
-                      socketRef.current.emit("change", [...userUpdate, {
-                        id: socketRef.current.id,
-                        videoFlag: false,
-                        audioFlag,
-                      }]);
+                      console.log("[RoomCopy] Disabling local video track");
+                      socketRef.current.emit("change", [
+                        ...userUpdate,
+                        { id: socketRef.current.id, videoFlag: false, audioFlag },
+                      ]);
                       track.enabled = false;
                       setVideoFlag(false);
                     } else {
-                      socketRef.current.emit("change", [...userUpdate, {
-                        id: socketRef.current.id,
-                        videoFlag: true,
-                        audioFlag,
-                      }]);
+                      console.log("[RoomCopy] Enabling local video track");
+                      socketRef.current.emit("change", [
+                        ...userUpdate,
+                        { id: socketRef.current.id, videoFlag: true, audioFlag },
+                      ]);
                       track.enabled = true;
                       setVideoFlag(true);
                     }
@@ -2291,22 +2420,22 @@ const RoomCopy = (props) => {
             src={audioFlag ? micunmute : micmute}
             onClick={() => {
               if (userVideo.current.srcObject) {
-                userVideo.current.srcObject.getTracks().forEach(function (track) {
+                userVideo.current.srcObject.getTracks().forEach((track) => {
                   if (track.kind === "audio") {
                     if (track.enabled) {
-                      socketRef.current.emit("change", [...userUpdate, {
-                        id: socketRef.current.id,
-                        videoFlag,
-                        audioFlag: false,
-                      }]);
+                      console.log("[RoomCopy] Disabling local audio track");
+                      socketRef.current.emit("change", [
+                        ...userUpdate,
+                        { id: socketRef.current.id, videoFlag, audioFlag: false },
+                      ]);
                       track.enabled = false;
                       setAudioFlag(false);
                     } else {
-                      socketRef.current.emit("change", [...userUpdate, {
-                        id: socketRef.current.id,
-                        videoFlag,
-                        audioFlag: true,
-                      }]);
+                      console.log("[RoomCopy] Enabling local audio track");
+                      socketRef.current.emit("change", [
+                        ...userUpdate,
+                        { id: socketRef.current.id, videoFlag, audioFlag: true },
+                      ]);
                       track.enabled = true;
                       setAudioFlag(true);
                     }
