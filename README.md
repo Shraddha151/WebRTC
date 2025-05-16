@@ -1,10 +1,10 @@
 
 ## How to use:
- 1) Open the url in browser 
+ 1) Open the url in browser: https://webrtcrealtimecommunication-j8sos3oa.b4a.run/
 
- 2) Click on create room
+ 3) Click on create room
 
- 3) Once a room is created copy the new url in the browser and share with others (For testing open the new url with incognito mode)
+ 4) Once a room is created copy the new url in the browser and share with others (For testing open the new url with incognito mode)
 
 
 ## Features:
