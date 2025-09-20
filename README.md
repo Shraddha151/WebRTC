@@ -1,6 +1,6 @@
 
 ## How to use:
- 1) Open the url in browser: https://webrtcrealtimecommunication-j8sos3oa.b4a.run/
+ 1) Open the url in browser: https://webrtcrealtimecommunication-hz8son8s.b4a.run/
 
  3) Click on create room
 
